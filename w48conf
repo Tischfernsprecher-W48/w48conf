@@ -1,0 +1,334 @@
+#!/bin/bash
+
+
+
+if [ $# -eq 0 ]
+  then
+    echo "Try: $0 --help"
+exit
+fi
+
+if [ -z "$1" ]
+  then
+    echo "No argument supplied"
+exit
+fi
+
+CFG_FILE=/etc/w48/w48.config
+
+
+if [ "x$1"  == "xwReset" ]; # Reset
+then
+    $CFG_FILE = "/etc/w48/w48$2.config"
+fi
+
+
+if [ "x$1"  == "x--help" ] || [ "x$1"  == "x-h" ] || [ "x$1"  == "xhelp" ]; # Hilfe
+then
+echo "Versuche:"
+echo "	$0 wSet"
+echo "	$0 boxname "
+echo "	$0 mSrv "
+echo "	$0 console "
+echo "	$0 samba "
+echo "	$0 mSrv "
+echo "	$0 upnp"
+echo "	$0 interfaces "
+echo "	$0 mCred"
+echo "	$0 telDev "
+echo "	$0 myNum "
+echo "	$0 wReset <oem> "
+echo ""
+echo "	oem:  "
+echo "		default"
+echo " 		avm "
+echo " "
+exit
+fi
+
+
+CFG_CONTENT=$(cat $CFG_FILE | sed -r '/[^=]+=[^=]+/!d' | sed -r 's/\s+=\s/=/g')
+eval "$CFG_CONTENT"
+
+if [ "x$1"  == "xwSet" ] || [ "x$1"  == "xwReset" ]; # Wlan Accesspoint
+then
+cat <<EOF >/etc/create_ap.conf
+CHANNEL=default
+GATEWAY=192.168.179.1
+WPA_VERSION=2
+ETC_HOSTS=0
+DHCP_DNS=gateway
+NO_DNS=0
+NO_DNSMASQ=0
+HIDDEN=0
+MAC_FILTER=0
+MAC_FILTER_ACCEPT=/etc/hostapd/hostapd.accept
+ISOLATE_CLIENTS=0
+SHARE_METHOD=nat
+IEEE80211N=1
+IEEE80211AC=1
+HT_CAPAB=[HT40+]
+VHT_CAPAB=
+DRIVER=nl80211
+NO_VIRT=0
+COUNTRY=DE
+FREQ_BAND=2.4
+DAEMONIZE=1
+NO_HAVEGED=0
+WIFI_IFACE=wlan0
+INTERNET_IFACE=wlan1
+SSID=${w48_AP_SSID}
+PASSPHRASE=${w48_AP_Passphrase}
+USE_PSK=0
+EOF
+( sync && sleep 5 && reboot ) &
+
+fi
+
+# NEW_MACADDR=${w48_mac_wlan0}
+
+if [ "x$1"  == "xboxname" ] || [ "x$1"  == "xwReset" ]; # Fon Name
+then
+cat <<EOF >/etc/hostname
+${w48_hostname}
+EOF
+
+cat <<EOF >/etc/hosts
+127.0.0.1       localhost ${w48_hostname}
+::1             localhost ip6-localhost ip6-loopback
+ff02::1         ip6-allnodes
+ff02::2         ip6-allrouters
+EOF
+( sync ) &
+fi
+
+
+if [ "x$1"  == "xmSrv" ] || [ "x$1"  == "xboxname" ] || [ "x$1"  == "xwReset" ]; # Mediaserver
+then
+cat <<EOF >/etc/minidlna.conf
+#user=minidlna
+media_dir=/var/lib/minidlna
+#merge_media_dirs=no
+#db_dir=/var/cache/minidlna
+#log_dir=/var/log
+#log_level=general,artwork,database,inotify,scanner,metadata,http,ssdp,tivo=warn
+#root_container=.
+#network_interface=
+port=8200
+presentation_url=http://fritz.fon
+friendly_name=${w48_hostname}
+#serial=
+#model_name=Windows Media Connect compatible (MiniDLNA)
+#model_number=
+inotify=yes
+album_art_names=Cover.jpg/cover.jpg/AlbumArtSmall.jpg/albumartsmall.jpg
+album_art_names=AlbumArt.jpg/albumart.jpg/Album.jpg/album.jpg
+album_art_names=Folder.jpg/folder.jpg/Thumb.jpg/thumb.jpg
+#strict_dlna=no
+#enable_tivo=no
+#notify_interval=895
+#minissdpdsocket=/run/minissdpd.sock
+#force_sort_criteria=
+#max_connections=50
+#wide_links=no
+EOF
+( sync && systemctl restart minidlna ) &
+fi
+
+if [ "x$1"  == "xconsole" ] || [ "x$1"  == "xboxname" ] || [ "x$1"  == "xwReset" ]; 
+then
+cat <<EOF >/etc/asterisk/console.conf
+[general]
+autoanswer = no
+language = de
+
+[default]
+input_device = default
+output_device = default
+autoanswer = no
+context = default
+extension = s
+callerid = ${w48_hostname}
+language = de
+overridecontext = no
+mohinterpret = default
+active = yes
+EOF
+( sync && systemctl reload asterisk ) &
+
+fi
+
+if [ "x$1"  == "xsamba" ] || [ "x$1"  == "xboxname" ] || [ "x$1"  == "xmSrv" ] || [ "x$1"  == "xwReset" ]; # Medienserver
+then
+cat <<EOF >/etc/samba/smb.conf
+[global]
+workgroup = ${samba_group}
+server string = ${w48_hostname}
+dns proxy = no
+log file = /var/log/samba/log.%m
+max log size = 1000
+syslog = 0
+panic action = /usr/share/samba/panic-action %d
+server role = standalone server
+passdb backend = tdbsam
+obey pam restrictions = yes
+unix password sync = yes
+passwd program = /usr/bin/passwd %u
+passwd chat = *Enter\snew\s*\spassword:* %n\n *Retype\snew\s*\spassword:* %n\n *password\supdated\ssuccessfully* .
+pam password change = yes
+map to guest = bad user
+usershare allow guests = yes
+EOF
+( sync && systemctl restart smbd.service ) &
+fi
+
+if [ "x$1"  == "xupnp" ] || [ "x$1"  == "xwReset" ]; 
+then
+cat <<EOF >/etc/upnpd.conf
+iptables_location = "/sbin/iptables"
+debug_mode = 2
+insert_forward_rules = yes
+forward_chain_name = FORWARD
+prerouting_chain_name = PREROUTING 
+upstream_bitrate = ${w48_upstream_bitrate}
+downstream_bitrate = ${w48_downstream_bitrate}
+duration = 86400 # One day
+description_document_name = fboxdesc.xml
+xml_document_path = /etc/linuxigd
+EOF
+( sync && systemctl restart w48upnpd ) &
+fi
+
+
+if [ "x$1"  == "xinterfaces" ] || [ "x$1" == "xmCred" ] || [ "x$1"  == "xwReset" ];  # Wlan Verbindung
+then
+cat <<EOF >/etc/network/interfaces
+auto lo
+iface lo inet loopback
+
+auto eth0
+allow-hotplug eth0
+iface eth0 inet dhcp
+iface eth0 inet6 auto
+
+auto wlan0
+allow-hotplug wlan0
+iface wlan0 inet static
+address 192.168.179.1
+netmask 255.255.255.0
+broadcast 192.168.179.255
+
+
+auto wlan1
+allow-hotplug wlan1
+iface wlan1 inet dhcp
+wpa-ap-scan 1
+wpa-scan-ssid 1
+wpa-ssid "${w48_GW_SSID}"
+wpa-psk "${w48_GW_Passphrase}"
+EOF
+
+( sync && sleep 5 && reboot ) &
+
+fi
+
+
+if [ "x$1"  == "xtelDev" ] || [ "x$1"  == "xmyNum"  ] || [ "x$1"  == "xwReset" ];  # Asterisk  Telefoniegeraete
+then
+cat <<EOF >/etc/asterisk/extensions.conf
+[default]
+exten => _X.,1,Dial(SIP/provider/\${EXTEN})
+exten => _X.,2,Hangup()
+
+exten => 600,1,Dial(SIP/600)
+exten => 601,1,Dial(SIP/601)
+
+[incoming]
+exten => s,1,AGI(mein-agi-skript.agi,hallo,welt)
+;exten => s,1,Dial(SIP/601&SIP/600)
+exten => s,n,Hangup()
+EOF
+
+cat <<EOF >/etc/asterisk/sip.conf
+[general]
+bindport = 5060
+bindaddr = 0.0.0.0
+udpbindaddr = 0.0.0.0
+tcpenable = no
+tlsenable=no
+transport=udp
+nat = auto_force_rport;auto_comedia
+srvlookup = no
+externhost = w48
+allowguest = no
+alwaysauthreject = yes
+externrefresh = 80
+canreinvite = no
+defaultexpirey = 3600
+registerattempts=0
+registertimeout=20
+rtsavepath=yes
+language = de
+tonezone=de
+textsupport=yes
+accept_outofcall_message = yes
+outofcall_message_context = messages
+videosupport = no
+checkmwi=10
+rtcachefriends=yes
+directmedia=no
+dtmfmode = rfc2833
+disallow = all
+allow = alaw
+allow = ulaw
+allow = g722
+allow = g726
+allow = ilbc
+allow=t140
+allow=red
+allow=h261
+allow=h263
+allow=h264
+allow=h263p
+allow=none
+allow=mpeg4
+
+register => ${w48_SIP_User}:${w48_SIP_Passwd}@${w48_SIP_Registrar}/${w48_SIP_User}
+
+[provider] 
+type=peer
+username=${w48_SIP_User}
+fromuser=${w48_SIP_Nummer}
+secret=${w48_SIP_Passwd}
+host=${w48_SIP_Registrar}
+fromdomain=${w48_SIP_Registrar}
+disallow=all
+allow=alaw 
+allow=ulaw 
+allow=g722
+allow=g726
+allow=ilbc
+
+
+
+[600]
+username=Fon_W48
+secret=H6Q4BJL8xDbQnpAQZSZenu9skmozS0PLh1lCdqHDNGAHUO7sxFLLr5IzrsERE7fRa456gF1KGS64jUKzM34cDWQGpEmFmnFozUjjR15YyxQf7JofGINgIqSEYm85xveo
+type=friend
+host=dynamic
+insecure=port,invite
+context=default
+
+[601]
+username=${w48_SIP_GUEST_User}
+secret=${w48_SIP_GUEST_Passwd}
+type=friend
+host=dynamic
+insecure=port,invite
+context=default
+
+EOF
+( sync && systemctl restart asterisk ) &
+fi
+
+
